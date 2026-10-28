@@ -1,5 +1,17 @@
 import { expect, test } from "bun:test"
-import { groupSessions, partitionWorking } from "../src/context/session-tabs-model"
+import { filterNavEntries, groupSessions, partitionWorking } from "../src/context/session-tabs-model"
+
+test("filterNavEntries matches every token across fields without changing order", () => {
+  const entries = ["Alpha /work/UI", "Beta /work/API", "Alpha /work/API"]
+  expect(filterNavEntries(entries, " ALPHA  api ", (item) => item)).toEqual(["Alpha /work/API"])
+})
+
+test("filterNavEntries preserves all entries for whitespace and rejects missing tokens", () => {
+  const entries = ["会话 /项目", "Other"]
+  expect(filterNavEntries(entries, " \t ", (item) => item)).toEqual(entries)
+  expect(filterNavEntries(entries, "项目", (item) => item)).toEqual(["会话 /项目"])
+  expect(filterNavEntries(entries, "missing", (item) => item)).toEqual([])
+})
 
 const entry = (id: string, projectID = "p1", updated = 0) => ({ id, projectID, time: { updated } })
 
