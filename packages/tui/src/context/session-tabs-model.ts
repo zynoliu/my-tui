@@ -184,6 +184,24 @@ export type SessionNavGroup<T> = {
   updated: number
 }
 
+/** Keep entries whose haystack contains every whitespace-separated query token; an empty query keeps everything. */
+export function filterNavEntries<T>(
+  entries: readonly T[],
+  query: string,
+  haystack: (entry: T) => string,
+): T[] {
+  const tokens = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+  if (tokens.length === 0) return [...entries]
+  return entries.filter((entry) => {
+    const text = haystack(entry).toLowerCase()
+    return tokens.every((token) => text.includes(token))
+  })
+}
+
 /** Group entries by project, newest first within and across groups; cap each group and report the overflow count. */
 export function groupSessions<T extends SessionNavEntry>(
   entries: readonly T[],

@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test"
-import { EmbeddedTerminalRenderable, type Renderable } from "@opentui/core"
+import { EmbeddedTerminalRenderable, InputRenderable, type Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Effect, FileSystem } from "effect"
 import { Global } from "@opencode/util/global"
@@ -466,6 +466,44 @@ test("session title generated while an untitled session is loading remains visib
   }
 })
 
+test("session filter Escape clears the query and restores the composer focus", async () => {
+  const session = {
+    id: "ses_filter",
+    title: "Filter fixture",
+    projectID: "project",
+    location: { directory },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: 2 },
+  }
+  await using setup = await createAppFixture({
+    width: 120,
+    height: 30,
+    config: { animations: false, tabs: { mode: "on", layout: "vertical" }, session: { sidebar: "hide" } },
+    args: { sessionID: session.id },
+    fetch: (url) => {
+      if (url.pathname === `/api/session/${session.id}`) return json({ data: session })
+      if (/^\/api\/session\/ses_filter\/(message|inbox|permission)$/.test(url.pathname))
+        return json({ data: [], cursor: {} })
+      return undefined
+    },
+  })
+  await setup.ready
+  await setup.waitForFrame((frame) => frame.includes(session.title) && !!setup.renderer.currentFocusedEditor)
+  const composer = setup.renderer.currentFocusedRenderable
+  setup.mockInput.pressKey("f", { meta: true })
+  await setup.waitForFrame(() => setup.renderer.currentFocusedRenderable instanceof InputRenderable)
+  const filter = setup.renderer.currentFocusedRenderable
+  if (!(filter instanceof InputRenderable)) throw new Error("Expected session filter input")
+  await setup.mockInput.typeText("unmatched_session_987")
+  await setup.waitForFrame((frame) => !frame.split("\n").some((line) => line.slice(0, 38).includes(session.title)))
+
+  setup.mockInput.pressEscape()
+
+  await setup.waitForFrame((frame) => frame.includes(session.title) && setup.renderer.currentFocusedRenderable === composer)
+  expect(filter.value).toBe("")
+})
+
 test("vertical session tabs switch to horizontal below readable content width", async () => {
   await using state = await tmpdir()
   await Bun.write(path.join(state.path, "test", "tui", "layout.json"), JSON.stringify({ verticalTabsWidth: 42 }))
@@ -495,13 +533,15 @@ test("vertical session tabs switch to horizontal below readable content width", 
     },
   })
   await setup.ready
-  await setup.waitForFrame((frame) => frame.split("\n")[1].slice(0, 42).includes(session.title))
+  await setup.waitForFrame((frame) => frame.split("\n").some((line) => line.slice(0, 42).includes(session.title)) &&
+    Boolean(setup.renderer.root.findDescendantById("session-nav-search")))
 
   setup.resize(100, 30)
   await setup.waitForFrame((frame) => frame.split("\n")[0].includes(session.title))
-  expect(setup.captureCharFrame()).not.toContain("⌕")
+  expect(setup.renderer.root.findDescendantById("session-nav-search")).toBeUndefined()
   setup.resize(120, 30)
-  await setup.waitForFrame((frame) => frame.split("\n")[1].slice(0, 42).includes(session.title))
+  await setup.waitForFrame((frame) => frame.split("\n").some((line) => line.slice(0, 42).includes(session.title)) &&
+    Boolean(setup.renderer.root.findDescendantById("session-nav-search")))
 })
 
 test("narrow vertical session tabs collapse to a compact rail with the terminal", async () => {
