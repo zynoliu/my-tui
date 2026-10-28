@@ -494,7 +494,7 @@ export function moveOpenSession(session: SessionInfo, event: Extract<OpenCodeEve
   }
 }
 
-function timeAgo(timestamp: number) {
+export function timeAgo(timestamp: number) {
   const minutes = Math.floor((Date.now() - timestamp) / 60_000)
   if (minutes < 1) return "now"
   if (minutes < 60) return `${minutes}m`

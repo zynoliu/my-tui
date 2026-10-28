@@ -139,7 +139,7 @@ export const Definitions = {
   "session.child.next": keybind("right", "Go to next child session"),
   "session.child.previous": keybind("left", "Go to previous child session"),
   "session.parent": keybind("up", "Go to parent session"),
-  "session.pin.toggle": keybind("ctrl+f", "Pin or unpin session in the session list"),
+  "session.pin.toggle": keybind("alt+p", "Pin or unpin session in the session list"),
   "session.quick_switch.1": keybind("<leader>1", "Switch to session in quick slot 1"),
   "session.quick_switch.2": keybind("<leader>2", "Switch to session in quick slot 2"),
   "session.quick_switch.3": keybind("<leader>3", "Switch to session in quick slot 3"),
