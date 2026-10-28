@@ -149,6 +149,66 @@ export type SessionTabMotionValues = {
   activities: number[]
 }
 
+// ── Session nav sidebar ─────────────────────────────────────────────
+
+/** The minimal session shape the nav sidebar model needs; `SessionInfo` satisfies it. */
+export type SessionNavEntry = {
+  id: string
+  projectID: string
+  updated: number
+}
+
+export type SessionNavWorking<T> = {
+  working: T[]
+  rest: T[]
+}
+
+/** Split entries into the live "working" partition and the remainder, preserving input order in both. */
+export function partitionWorking<T extends SessionNavEntry>(
+  entries: readonly T[],
+  isWorking: (entry: T) => boolean,
+): SessionNavWorking<T> {
+  const working: T[] = []
+  const rest: T[] = []
+  for (const entry of entries) {
+    if (isWorking(entry)) working.push(entry)
+    else rest.push(entry)
+  }
+  return { working, rest }
+}
+
+export type SessionNavGroup<T> = {
+  key: string
+  sessions: T[]
+  overflow: number
+  updated: number
+}
+
+/** Group entries by project, newest first within and across groups; cap each group and report the overflow count. */
+export function groupSessions<T extends SessionNavEntry>(
+  entries: readonly T[],
+  options: { projectOf?: (entry: T) => string; cap?: number } = {},
+): SessionNavGroup<T>[] {
+  const projectOf = options.projectOf ?? ((entry: T) => entry.projectID)
+  const cap = options.cap ?? 10
+  const byKey = new Map<string, T[]>()
+  for (const entry of entries) {
+    const key = projectOf(entry)
+    const list = byKey.get(key)
+    if (list) list.push(entry)
+    else byKey.set(key, [entry])
+  }
+  return Array.from(byKey, ([key, sessions]) => {
+    const sorted = sessions.toSorted((a, b) => b.updated - a.updated)
+    return {
+      key,
+      sessions: sorted.slice(0, cap),
+      overflow: Math.max(0, sorted.length - cap),
+      updated: sorted[0]?.updated ?? 0,
+    }
+  }).toSorted((a, b) => b.updated - a.updated)
+}
+
 /**
  * Seed width motion for a visible-tab membership change: retained tabs keep their current animated
  * values and first-seen tabs grow in from zero width. Returns undefined when nothing is retained,
