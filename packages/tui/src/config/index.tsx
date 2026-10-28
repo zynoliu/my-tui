@@ -333,7 +333,7 @@ export function resolve(
       mode: tabsMode,
       enabled: tabsMode === "on" || (tabsMode === "auto" && (options.environment ?? process.env).HERDR_ENV !== "1"),
       scope: input.tabs?.scope ?? "cwd",
-      layout: input.tabs?.layout ?? "horizontal",
+      layout: input.tabs?.layout ?? "vertical",
       indicators: input.tabs?.indicators ?? "status",
     },
   }

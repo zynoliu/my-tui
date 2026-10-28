@@ -68,7 +68,7 @@ test("resolves nested config and keybind defaults", () => {
     mode: "auto",
     enabled: true,
     scope: "cwd",
-    layout: "horizontal",
+    layout: "vertical",
     indicators: "status",
   })
   expect(config.session.new_location).toBe("launch")
