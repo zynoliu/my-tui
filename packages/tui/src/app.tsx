@@ -78,6 +78,7 @@ import { DialogAgent } from "./component/dialog-agent"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogOpen, DialogOpenKey, moveOpenSession } from "./component/dialog-open"
 import { SessionTabs } from "./component/session-tabs"
+import { SessionNav } from "./component/session-nav"
 import { clampSessionTabsWidth, sessionTabsFitVertically, SESSION_SIDEBAR_WIDTH } from "./ui/layout"
 import { createPaneResize } from "./ui/pane-resize"
 import { PaneResizeHandle } from "./ui/pane-resize-handle"
@@ -1432,7 +1433,7 @@ function App() {
         onMouseUp={tabsResize.onMouseUp}
       >
         <Show when={verticalTabsVisible()}>
-          <SessionTabs orientation="vertical" width={tabsResize.size()} />
+          <SessionNav width={tabsResize.size()} />
         </Show>
         <box flexGrow={1} minWidth={0} flexDirection="column">
           <Show when={plugins.ready()}>

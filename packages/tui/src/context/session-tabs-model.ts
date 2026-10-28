@@ -155,7 +155,7 @@ export type SessionTabMotionValues = {
 export type SessionNavEntry = {
   id: string
   projectID: string
-  updated: number
+  time: { updated: number }
 }
 
 export type SessionNavWorking<T> = {
@@ -199,12 +199,12 @@ export function groupSessions<T extends SessionNavEntry>(
     else byKey.set(key, [entry])
   }
   return Array.from(byKey, ([key, sessions]) => {
-    const sorted = sessions.toSorted((a, b) => b.updated - a.updated)
+    const sorted = sessions.toSorted((a, b) => b.time.updated - a.time.updated)
     return {
       key,
       sessions: sorted.slice(0, cap),
       overflow: Math.max(0, sorted.length - cap),
-      updated: sorted[0]?.updated ?? 0,
+      updated: sorted[0]?.time.updated ?? 0,
     }
   }).toSorted((a, b) => b.updated - a.updated)
 }

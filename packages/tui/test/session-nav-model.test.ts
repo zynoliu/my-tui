@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { groupSessions, partitionWorking } from "../src/context/session-tabs-model"
 
-const entry = (id: string, projectID = "p1", updated = 0) => ({ id, projectID, updated })
+const entry = (id: string, projectID = "p1", updated = 0) => ({ id, projectID, time: { updated } })
 
 test("partitionWorking splits by predicate preserving order", () => {
   const entries = [entry("a", "p1", 3), entry("b", "p2", 2), entry("c", "p1", 1)]
