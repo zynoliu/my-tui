@@ -122,6 +122,21 @@ test.each(["default", "configured"] as const)("%s shortcuts preserve composer fo
   expect(app.captureCharFrame()).toContain("Alpha task")
 })
 
+test("sidebar separates navigation levels without extending session selection below its content", async () => {
+  // Given
+  await using app = await fixture()
+  // When
+  await app.renderOnce()
+  const header = app.node("session-nav-header")
+  const search = app.node("session-nav-search-block")
+  const group = app.node("session-nav-group-proj_alpha")
+  const row = app.node("session-nav-row-ses_alpha")
+  // Then
+  expect(search.y).toBeGreaterThanOrEqual(header.y + header.height + 1)
+  expect(row.y).toBeGreaterThanOrEqual(group.y + group.height + 1)
+  expect(row.height).toBe(2)
+})
+
 test("keyboard headings reopen when every project is folded and G expands all", async () => {
   // Given
   await using app = await fixture()
@@ -211,6 +226,27 @@ test("New chooses a project's canonical directory without creating a fake sessio
   expect(await location.promise).toBe("/fixture/beta")
   await app.waitForFrame((frame) => !frame.includes("New session in project"))
   expect(app.writes).not.toContain("POST /api/session")
+})
+
+test("project picker reveals the full focused directory when its row is shortened", async () => {
+  // Given
+  const directory = "/fixture/review-prefix/middlemarker/meaningful/project-beta"
+  await using app = await fixture((url, request) => {
+    if (url.pathname !== "/api/session" || request.method !== "GET" || url.searchParams.get("parentID") !== "null") return
+    return json({ data: [
+      session("ses_alpha", "proj_alpha"),
+      { ...session("ses_beta", "proj_beta"), location: { directory } },
+    ], cursor: {} })
+  })
+  // When
+  await app.click("session-nav-new")
+  await app.waitForFrame((frame) => frame.includes("New session in project") &&
+    app.renderer.currentFocusedRenderable instanceof InputRenderable)
+  app.mockInput.pressArrow("up")
+  // Then
+  await app.waitForFrame((frame) => frame.includes("middlemarker") && frame.includes("project-beta"))
+  const row = app.captureCharFrame().split("\n").find((line) => line.includes("beta project /fixture/"))
+  expect(row).toContain("…")
 })
 
 test.each(["mouse", "keyboard"] as const)("native %s menu anchors to its row and Escape cancels", async (method) => {

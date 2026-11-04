@@ -35,6 +35,7 @@ export interface DialogSelectProps<T> {
   emptyView?: JSX.Element
   noMatchView?: JSX.Element
   options: DialogSelectOption<T>[]
+  showSelectedDetail?: boolean
   flat?: boolean
   filterThreshold?: number
   ref?: (ref: DialogSelectRef<T>) => void
@@ -841,7 +842,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
             </box>
           </Show>
           {/* Reserved whenever any option has a detail, so the dialog does not resize as the selection moves. */}
-          <Show when={newDesigns() && flat().some((option) => option.detail !== undefined)}>
+          <Show when={(newDesigns() || props.showSelectedDetail) && flat().some((option) => option.detail !== undefined)}>
             <box paddingTop={1} paddingLeft={DIALOG_LIST_INSET} paddingRight={DIALOG_LIST_INSET} flexShrink={0}>
               <Show
                 when={detailView()}

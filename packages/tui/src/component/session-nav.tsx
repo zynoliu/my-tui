@@ -24,6 +24,7 @@ import { timeAgo } from "./dialog-open"
 import { projectName } from "../util/project"
 import { errorMessage } from "../util/error"
 import { stringWidth } from "../util/string-width"
+import { Locale } from "../util/locale"
 import { SESSION_SIDEBAR_WIDTH } from "../ui/layout"
 
 const REFETCH_EVENTS = ["session.created", "session.archived", "session.unarchived", "session.deleted", "session.moved", "session.renamed"]
@@ -243,11 +244,17 @@ export function SessionNav(props: { width?: number }) {
         const session = all().find((session) => session.projectID === id && session.id === selected()) ?? all().find((session) => session.projectID === id)
         const directory = session?.location.directory ?? project?.canonical
         if (!directory) return []
-        return [{ title: projectName(project, directory) ?? directory, description: directory, value: session?.location ?? { directory } }]
+        return [{
+          title: projectName(project, directory) ?? directory,
+          description: Locale.truncateMiddle(directory, 24),
+          searchText: directory,
+          detail: directory,
+          value: session?.location ?? { directory },
+        }]
       })
       if (!options.length) { restoreFocus(); sessionTabs.add(); return }
       const current = data.session.get(focused()?.session?.id ?? selected() ?? "")?.location.directory
-      dialog.replace(() => <DialogSelect title="New session in project" options={options}
+      dialog.replace(() => <DialogSelect title="New session in project" options={options} showSelectedDetail
         current={options.find((option) => option.value.directory === current)?.value}
         onSelect={(option) => {
           dialog.clear()
@@ -426,7 +433,7 @@ export function SessionNav(props: { width?: number }) {
     const dot = () => status().attention || busy() ? "●" : live().outcome === "failed" ? "×" : status().unread !== undefined ? "○" : ""
     const dotColor = () => status().attention ? theme.text.feedback.warning.base : busy() ? theme.text.feedback.success.base
       : live().outcome === "failed" ? theme.text.feedback.error.base : theme.text.muted
-    return <box id={`session-nav-row-${row.session.id}`} height={3} flexShrink={0} paddingLeft={1} paddingRight={1}
+    return <box id={`session-nav-row-${row.session.id}`} height={2} flexShrink={0} marginBottom={1} paddingLeft={1} paddingRight={1}
       backgroundColor={current() || hovered() ? theme.background.raised.high : active() ? theme.background.action.primary.focused : undefined}
       onMouseOver={() => setHovered(true)} onMouseOut={() => setHovered(false)}
       onMouseDown={(mouse) => {
@@ -464,11 +471,11 @@ export function SessionNav(props: { width?: number }) {
   }
   return <box width={width()} flexShrink={0} minHeight={0} backgroundColor={theme.background.raised.base}
     onMouseDown={() => setKeyboard(false)} onMouseMove={() => setKeyboard(false)}>
-    <box height={2} flexShrink={0} paddingLeft={2} paddingRight={2} flexDirection="row" alignItems="center" justifyContent="space-between">
+    <box id="session-nav-header" height={2} flexShrink={0} paddingLeft={2} paddingRight={2} flexDirection="row" alignItems="center" justifyContent="space-between">
       <text fg={theme.text.base} attributes={TextAttributes.BOLD}>{archived() ? "Archived" : "Sessions"}</text>
       <Button id="session-nav-new" run={() => { void newSession() }}>+ New</Button>
     </box>
-    <box id="session-nav-search-block" height={3} flexShrink={0} marginLeft={2} marginRight={2} marginBottom={1} padding={1}
+    <box id="session-nav-search-block" height={3} flexShrink={0} marginTop={1} marginLeft={2} marginRight={2} marginBottom={1} padding={1}
       backgroundColor={theme.background.formfield.base} onMouseDown={focusSearch}>
       <input id="session-nav-search" ref={setInput} onInput={setQuery} placeholder="Search sessions"
         backgroundColor={theme.background.formfield.base} focusedBackgroundColor={theme.background.formfield.focused}
@@ -482,7 +489,7 @@ export function SessionNav(props: { width?: number }) {
           const closed = () => !query().trim() && collapsed[group.key]
           const active = () => keyboard() && focusedTarget() === list() && focus() === `session-nav-group-${group.key}` && !overlay()
           return <box flexShrink={0}>
-            <box id={`session-nav-group-${group.key}`} height={2} paddingLeft={1} paddingRight={2} justifyContent="flex-end"
+            <box id={`session-nav-group-${group.key}`} height={2} marginBottom={1} paddingLeft={1} paddingRight={2} justifyContent="center"
               onMouseUp={(mouse) => { if (mouse.button === MouseButton.LEFT) { focusList(); setKeyboard(false); fold(group.key) } }}>
               <box height={1} flexDirection="row" gap={1}>
                 <text fg={theme.text.base}>{closed() ? "▶" : "▼"}</text>
