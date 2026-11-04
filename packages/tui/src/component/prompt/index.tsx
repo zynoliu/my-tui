@@ -748,8 +748,7 @@ export function Prompt(props: PromptProps) {
     input.focusable = true
     // Slot/plugin updates can remount the background prompt while a dialog is open.
     // Keep focus with the dialog and let the prompt reclaim it after the dialog closes.
-    const focused = renderer.currentFocusedRenderable
-    if (!input.focused && (!focused || focused.isDestroyed)) input.focus()
+    if (!input.focused) input.focus()
   })
 
   createEffect(() => {
