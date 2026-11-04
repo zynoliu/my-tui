@@ -216,6 +216,7 @@ test("New chooses a project's canonical directory without creating a fake sessio
 test.each(["mouse", "keyboard"] as const)("native %s menu anchors to its row and Escape cancels", async (method) => {
   // Given
   await using app = await fixture()
+  await app.renderOnce()
   const row = app.node("session-nav-row-ses_alpha")
   // When
   if (method === "mouse") await app.mockMouse.click(row.x + 2, row.y, MouseButton.RIGHT)
@@ -341,6 +342,23 @@ test.each(["archive", "delete"] as const)("rejected %s retains the row with visi
   await app.waitForFrame((frame) => frame.includes(`Could not ${action} session`))
   expect(app.node("session-nav-row-ses_beta")).toBeDefined()
   expect(app.records.get("ses_beta")?.time.archived).toBeUndefined()
+})
+
+test("a busy session moves into Working and out of its project group", async () => {
+  // Given
+  await using app = await fixture()
+  await app.renderOnce()
+  expect(app.renderer.root.findDescendantById("session-nav-group-working")).toBeUndefined()
+  // When
+  app.events.emit({ id: "evt_running", created: 40, type: "session.execution.started",
+    durable: { aggregateID: "ses_beta", seq: 1, version: 1 }, data: { sessionID: "ses_beta" } })
+  // Then
+  await app.waitForFrame((frame) => frame.includes("Working"))
+  const working = app.node("session-nav-group-working")
+  const row = app.node("session-nav-row-ses_beta")
+  expect(row.y).toBeGreaterThanOrEqual(working.y + working.height)
+  expect(app.renderer.root.findDescendantById("session-nav-group-proj_beta")).toBeUndefined()
+  expect(app.captureCharFrame().split("Beta task")).toHaveLength(2)
 })
 
 test.each(["session.deleted", "session.archived"] as const)("%s events remove membership without stale resurrection", async (type) => {

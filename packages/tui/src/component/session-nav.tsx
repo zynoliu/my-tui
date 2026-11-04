@@ -18,7 +18,7 @@ import { Keymap } from "../context/keymap"
 import { useDialog } from "../ui/dialog"
 import { DialogSelect } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
-import { filterNavEntries, groupSessions } from "../context/session-tabs-model"
+import { filterNavEntries, groupSessions, partitionWorking } from "../context/session-tabs-model"
 import { DialogSessionRename } from "./dialog-session-rename"
 import { timeAgo } from "./dialog-open"
 import { projectName } from "../util/project"
@@ -129,9 +129,16 @@ export function SessionNav(props: { width?: number }) {
       const session = filtered().find((session) => session.id === id)
       return session ? [session] : []
     })
+    const rest = filtered().filter((session) => !pins.some((pin) => pin.id === session.id))
+    // Execution state only: tab status also tracks unread pulses, and permission/form snapshots
+    // arrive asynchronously, so either would rebuild every row while the user is interacting.
+    // Sessions waiting on a decision stay in their project group, marked by the attention dot.
+    const { working, rest: idle } = partitionWorking(rest, (session) =>
+      [session.id, ...data.session.family(session.id)].some((id) => data.session.status(id) === "running"))
     return [
       ...(pins.length ? [{ key: "pinned", title: "Pinned", sessions: pins }] : []),
-      ...groupSessions(filtered().filter((session) => !pins.some((pin) => pin.id === session.id)), { cap: Infinity }).map((group) => ({
+      ...(working.length ? [{ key: "working", title: "Working", sessions: working }] : []),
+      ...groupSessions(idle, { cap: Infinity }).map((group) => ({
         key: group.key,
         title: projectName(data.project.get(group.key), group.sessions[0]?.location.directory),
         sessions: group.sessions,
