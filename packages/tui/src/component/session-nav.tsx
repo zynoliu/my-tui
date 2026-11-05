@@ -1,4 +1,3 @@
-import { basename } from "node:path"
 import { For, Show, createEffect, createMemo, createResource, createSignal, onCleanup, onMount, type JSX } from "solid-js"
 import { Portal, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { BoxRenderable, CliRenderEvents, InputRenderable, MouseButton, ScrollBoxRenderable, TextAttributes, type Renderable } from "@opentui/core"
@@ -18,7 +17,7 @@ import { Keymap } from "../context/keymap"
 import { useDialog } from "../ui/dialog"
 import { DialogSelect } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
-import { filterNavEntries, groupSessions, partitionWorking } from "../context/session-tabs-model"
+import { filterNavEntries, groupSessions, partitionWorking, sessionTabNumberLabel } from "../context/session-tabs-model"
 import { DialogSessionRename } from "./dialog-session-rename"
 import { timeAgo } from "./dialog-open"
 import { projectName } from "../util/project"
@@ -27,7 +26,7 @@ import { stringWidth } from "../util/string-width"
 import { Locale } from "../util/locale"
 import { SESSION_SIDEBAR_WIDTH } from "../ui/layout"
 
-const REFETCH_EVENTS = ["session.created", "session.archived", "session.unarchived", "session.deleted", "session.moved", "session.renamed"]
+const REFETCH_EVENTS = ["session.created", "session.archived", "session.unarchived", "session.deleted", "session.moved"]
 type NavEntry = { key: string; group: string; session?: SessionInfo }
 type NavAction = { title: string; run: () => void }
 type MenuState = { x: number; y: number; sessionID: string }
@@ -61,6 +60,8 @@ export function SessionNav(props: { width?: number }) {
   const [more, setMore] = createSignal<{ data: SessionInfo[]; next?: SessionsResponse["cursor"]["next"]; loaded: boolean }>({ data: [], loaded: false })
   const [loadingMore, setLoadingMore] = createSignal(false)
   const [collapsed, setCollapsed] = useStorage().store<Record<string, boolean>>("session-nav-collapsed", { initial: {} })
+  // Relative labels would otherwise freeze at their first render inside an always-visible sidebar.
+  const [clock, setClock] = createSignal(Date.now())
   let scroll: ScrollBoxRenderable | undefined
   let previousFocus: Renderable | null = null
   const request = createMemo(() => ({ search: query().trim(), archived: archived(), revision: revision() }))
@@ -86,6 +87,10 @@ export function SessionNav(props: { width?: number }) {
     }
   })
   onMount(() => { void data.project.sync().catch((error) => fail("Could not load projects", error)) })
+  onMount(() => {
+    const timer = setInterval(() => setClock(Date.now()), 60_000)
+    onCleanup(() => clearInterval(timer))
+  })
   onCleanup(event.subscribe((evt) => {
     if (evt.type === "session.archived" || evt.type === "session.unarchived") {
       setMembership((current) => new Map(current).set(evt.data.sessionID, evt.type === "session.archived"))
@@ -125,6 +130,7 @@ export function SessionNav(props: { width?: number }) {
     projectName(data.project.get(session.projectID), session.location.directory),
     session.location.directory,
   ].join(" ")))
+  const selected = () => sessionTabs.current()
   const groups = createMemo(() => {
     const pins = archived() ? [] : local.session.pinned().flatMap((id) => {
       const session = filtered().find((session) => session.id === id)
@@ -134,7 +140,11 @@ export function SessionNav(props: { width?: number }) {
     // Execution state only: tab status also tracks unread pulses, and permission/form snapshots
     // arrive asynchronously, so either would rebuild every row while the user is interacting.
     // Sessions waiting on a decision stay in their project group, marked by the attention dot.
+    // The open session also stays put: submitting a prompt would otherwise move the row the user
+    // is working in to the top of the list.
+    const selectedID = selected()
     const { working, rest: idle } = partitionWorking(rest, (session) =>
+      session.id !== selectedID &&
       [session.id, ...data.session.family(session.id)].some((id) => data.session.status(id) === "running"))
     return [
       ...(pins.length ? [{ key: "pinned", title: "Pinned", sessions: pins }] : []),
@@ -152,11 +162,16 @@ export function SessionNav(props: { width?: number }) {
       key: `session-nav-row-${session.id}`, group: group.key, session,
     }))),
   ]))
-  const selected = () => sessionTabs.current()
   const focused = () => entries().find((entry) => entry.key === focus())
   const next = () => more().loaded ? more().next : remote()?.cursor.next
   const overlay = () => dialog.stack.length > 0 || Boolean(menu())
   const ownsFocus = () => renderer.currentFocusedRenderable === list() || renderer.currentFocusedRenderable === input()
+  const hint = () => {
+    if (overlay()) return ""
+    if (focusedTarget() === input()) return "↵ results · esc clear"
+    if (focusedTarget() === list()) return "↵ open · / search · p pin"
+    return ""
+  }
   onMount(() => {
     const changed = () => {
       const current = renderer.currentFocusedRenderable
@@ -406,7 +421,7 @@ export function SessionNav(props: { width?: number }) {
       ...(["return", "space"] as const).map((key) => ({ bind: key, title: "Open session or toggle project", run: () => {
         const entry = focused()
         if (!entry) return
-        if (!entry.session || key === "space") { fold(entry.group); return }
+        if (!entry.session) { fold(entry.group); return }
         open(entry.session)
       } })),
       { bind: "escape", title: "Return to editor", run: restoreFocus },
@@ -428,8 +443,30 @@ export function SessionNav(props: { width?: number }) {
     const current = () => selected() === row.session.id
     const active = () => keyboard() && focusedTarget() === list() && focus() === `session-nav-row-${row.session.id}` && !overlay()
     const status = () => sessionTabs.status(row.session.id)
+    const tab = () => {
+      if (!sessionTabs.enabled()) return ""
+      const index = sessionTabs.tabs().findIndex((item) => item.sessionID === row.session.id)
+      return index === -1 ? "" : sessionTabNumberLabel(index)
+    }
+    const cue = () => {
+      const number = tab()
+      return `${active() ? "›" : " "}${number ? (number.length > 1 ? "·" : number) : " "}`
+    }
+    const relative = () => {
+      const directory = live().location.directory
+      const canonical = data.project.get(live().projectID)?.canonical
+      if (!canonical || canonical === directory) return ""
+      return directory.startsWith(`${canonical}/`) ? directory.slice(canonical.length + 1) : directory
+    }
+    const context = () => data.location.vcs.info(live().location)?.branch.current ?? relative()
+    // Branch context is location data, not session data; sync it so rows without an open tab render
+    // the same metadata as open ones.
+    createEffect(() => {
+      const location = live().location
+      void data.location.vcs.sync(location).catch(() => undefined)
+    })
     const busy = () => data.session.status(row.session.id) === "running" || data.session.family(row.session.id).some((id) => data.session.status(id) === "running")
-    const label = () => status().attention === "permission" ? "Needs approval" : status().attention === "question" ? "Needs answer" : timeAgo(live().time.updated)
+    const label = () => status().attention === "permission" ? "Needs approval" : status().attention === "question" ? "Needs answer" : timeAgo(live().time.updated, clock())
     const dot = () => status().attention || busy() ? "●" : live().outcome === "failed" ? "×" : status().unread !== undefined ? "○" : ""
     const dotColor = () => status().attention ? theme.text.feedback.warning.base : busy() ? theme.text.feedback.success.base
       : live().outcome === "failed" ? theme.text.feedback.error.base : theme.text.muted
@@ -446,8 +483,8 @@ export function SessionNav(props: { width?: number }) {
         if (mouse.button === MouseButton.LEFT) { mouse.stopPropagation(); open(row.session) }
         if (mouse.button === MouseButton.MIDDLE) sessionTabs.close(row.session.id)
       }}>
-      <box flexDirection="row" height={1}>
-        <text width={2} flexShrink={0} fg={theme.text.formfield.focused}>{active() ? "› " : "  "}</text>
+      <box flexDirection="row" height={1} gap={1}>
+        <text width={2} flexShrink={0} fg={theme.text.formfield.focused}>{cue()}</text>
         <text attributes={current() ? TextAttributes.BOLD : undefined} fg={theme.text.base} truncate wrapMode="none" flexGrow={1} minWidth={0}>
           {withTimestampedFallback(live())}
         </text>
@@ -455,7 +492,7 @@ export function SessionNav(props: { width?: number }) {
       </box>
       <box flexDirection="row" height={1} paddingLeft={2} gap={1}>
         <text fg={theme.text.muted} truncate wrapMode="none" minWidth={0} flexGrow={1}>
-          {data.location.vcs.info(live().location)?.branch.current ?? basename(live().location.directory)}
+          {context()}
         </text>
         <text fg={theme.text.muted} flexShrink={0}>{label()}</text>
       </box>
@@ -513,6 +550,9 @@ export function SessionNav(props: { width?: number }) {
           <box padding={1}><Button id="session-nav-more" run={() => { void loadMore() }}>{loadingMore() ? "Loading…" : "Load more · Ctrl+↓"}</Button></box>
         </Show>
       </scrollbox>
+    </box>
+    <box height={1} flexShrink={0} paddingLeft={2} paddingRight={2}>
+      <text fg={theme.text.muted} truncate wrapMode="none" flexGrow={1} minWidth={0}>{hint()}</text>
     </box>
     <box height={2} flexShrink={0} paddingLeft={2} paddingRight={2} justifyContent="center">
       <Button id="session-nav-archive" run={toggleArchive}>{archived() ? "‹ Active sessions" : "Archived sessions"}</Button>

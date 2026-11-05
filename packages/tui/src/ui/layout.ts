@@ -1,6 +1,9 @@
 export const SESSION_SIDEBAR_WIDTH = 42
 export const SESSION_TABS_COMPACT_WIDTH = 5
 export const SESSION_TABS_COMPACT_BREAKPOINT = 12
+// The session list needs room for a title, a status column and a search field; below this the
+// compact tab rail is the readable option.
+export const SESSION_NAV_MIN_WIDTH = 24
 export const SESSION_SIDEBAR_MAX_WIDTH = 72
 const SESSION_CONTENT_MIN_WIDTH = 44
 const SESSION_CONTENT_PREFERRED_WIDTH = 64

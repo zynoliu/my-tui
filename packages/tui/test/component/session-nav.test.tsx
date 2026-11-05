@@ -1,9 +1,13 @@
 import { expect, test } from "bun:test"
 // allow: SIZE_OK - Single-file integration deliverable; scenarios share one wire-level app fixture.
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { InputRenderable, MouseButton, TextareaRenderable } from "@opentui/core"
 import type { SessionInfo } from "@opencode/client"
 import { Schema } from "effect"
 import type { Config } from "../../src/config"
+import { SESSION_NAV_MIN_WIDTH } from "../../src/ui/layout"
 import { createAppFixture } from "../fixture/app"
 import { directory, json, type FetchHandler } from "../fixture/tui-client"
 
@@ -16,13 +20,14 @@ function session(id: string, projectID: string): SessionInfo {
   }
 }
 
-async function fixture(override?: FetchHandler, config?: Config.Info) {
+async function fixture(override?: FetchHandler, config?: Config.Info, state?: string, waitForNav = true) {
   // Mutable wire state is the authoritative server, not a mocked client.
   const records = new Map(["alpha", "beta"].map((key) => [`ses_${key}`, session(`ses_${key}`, `proj_${key}`)]))
   const writes: string[] = []
   const setup = await createAppFixture({
     width: 140, height: 42, args: { sessionID: "ses_alpha" },
     config: { animations: false, tabs: { mode: "on", layout: "vertical", scope: "global" }, ...config },
+    ...(state ? { state } : {}),
     fetch: async (url, request) => {
       if (request.method !== "GET") writes.push(`${request.method} ${url.pathname}`)
       const response = await override?.(url, request)
@@ -86,7 +91,7 @@ async function fixture(override?: FetchHandler, config?: Config.Info) {
   }
   try {
     await setup.ready
-    await setup.waitForFrame(() => Boolean(setup.renderer.root.findDescendantById("session-nav-row-ses_beta")) &&
+    await setup.waitForFrame(() => Boolean(setup.renderer.root.findDescendantById("session-nav-row-ses_beta")) === waitForNav &&
       setup.renderer.currentFocusedEditor !== null)
   } catch (error) {
     await setup[Symbol.asyncDispose]()
@@ -253,6 +258,13 @@ test.each(["mouse", "keyboard"] as const)("native %s menu anchors to its row and
   // Given
   await using app = await fixture()
   await app.renderOnce()
+  const rowNode = () => app.renderer.root.findDescendantById("session-nav-row-ses_alpha")
+  // The row is recreated when its async branch data lands; wait for both the layout and the data.
+  await app.waitForFrame(() => {
+    const target = rowNode()
+    return target !== undefined && target.y > 0 &&
+      app.captureCharFrame().split("\n")[target.y + 1]?.includes("main") === true
+  })
   const row = app.node("session-nav-row-ses_alpha")
   // When
   if (method === "mouse") await app.mockMouse.click(row.x + 2, row.y, MouseButton.RIGHT)
@@ -270,8 +282,10 @@ test.each(["mouse", "keyboard"] as const)("native %s menu anchors to its row and
   app.mockInput.pressEscape()
   await app.waitForFrame(() => !app.renderer.root.findDescendantById("session-nav-menu"))
   expect(app.records.size).toBe(2)
-  expect(position.y).toBe(row.y + 1)
-  expect(position.x).toBe(row.x + (method === "mouse" ? 2 : 0))
+  await app.waitForFrame(() => (rowNode()?.y ?? 0) > 0)
+  const anchor = app.node("session-nav-row-ses_alpha")
+  expect(position.y).toBe(anchor.y + 1)
+  expect(position.x).toBe(anchor.x + (method === "mouse" ? 2 : 0))
 })
 
 test("idle archive preserves failed unread metadata and restore selects the real session", async () => {
@@ -345,9 +359,118 @@ test("confirmed attention archive interrupts before rejecting permission and can
   expect(app.records.get("ses_beta")).toMatchObject({ outcome: "failed", time: { idle: 20, viewed: 10, archived: 40 } })
 })
 
-test("native rename updates the authoritative title and row", async () => {
+test.each([
+  [SESSION_NAV_MIN_WIDTH - 1, false],
+  [SESSION_NAV_MIN_WIDTH, true],
+] as const)("sidebar renders the session list only at or above its minimum width (%i columns)", async (width, listed) => {
+  // Given
+  const state = mkdtempSync(join(tmpdir(), "opencode-nav-width-"))
+  mkdirSync(join(state, "test", "tui"), { recursive: true })
+  writeFileSync(join(state, "test", "tui", "layout.json"), JSON.stringify({ verticalTabsWidth: width }))
+  try {
+    await using app = await fixture(undefined, undefined, state, listed)
+    await app.renderOnce()
+    // Then
+    expect(Boolean(app.renderer.root.findDescendantById("session-nav-list"))).toBe(listed)
+  } finally {
+    rmSync(state, { recursive: true, force: true })
+  }
+})
+
+test("open sessions show their tab ordinal and closing the tab clears it", async () => {
   // Given
   await using app = await fixture()
+  await app.waitForFrame((frame) => frame.split("\n").some((line) => line.trimStart().startsWith("1 Alpha task")))
+  // When
+  await app.click("session-nav-row-ses_beta")
+  // Then
+  await app.waitForFrame((frame) => frame.split("\n").some((line) => line.trimStart().startsWith("2 Beta task")))
+  await app.menu("close-tab", "ses_beta")
+  await app.waitForFrame((frame) => !frame.split("\n").some((line) => line.trimStart().startsWith("2 Beta task")))
+  expect(app.captureCharFrame()).toContain("Beta task")
+})
+
+test("session rows use the branch or project-relative context instead of repeating the project name", async () => {
+  // Given
+  const gamma = { ...session("ses_gamma", "proj_beta"), title: "Gamma task", location: { directory: "/fixture/beta/sub" } }
+  await using app = await fixture((url, request) => {
+    if (url.pathname === "/api/vcs") return json({ location: { directory: "/fixture/beta" }, data: { branch: {} } })
+    if (url.pathname === "/api/session" && request.method === "GET" && url.searchParams.get("parentID") === "null")
+      return json({ data: [session("ses_alpha", "proj_alpha"), session("ses_beta", "proj_beta"), gamma], cursor: {} })
+  })
+  // When
+  await app.waitForFrame((frame) => frame.includes("Gamma task"))
+  // Then
+  const rowLine = (id: string) => app.captureCharFrame().split("\n")[app.node(`session-nav-row-${id}`).y + 1]
+  await app.waitForFrame((frame) => frame.split("\n")[app.node("session-nav-row-ses_gamma").y + 1].includes("sub"))
+  expect(rowLine("ses_gamma")).toContain("sub")
+  expect(rowLine("ses_beta")).not.toContain("beta")
+  expect(rowLine("ses_alpha")).not.toContain("alpha")
+})
+
+test("session rows show the resolved branch", async () => {
+  // Given
+  await using app = await fixture()
+  // When
+  await app.waitForFrame((frame) => frame.split("\n")[app.node("session-nav-row-ses_alpha").y + 1].includes("main"))
+  // Then
+  expect(app.captureCharFrame().split("\n")[app.node("session-nav-row-ses_alpha").y + 1]).toContain("main")
+})
+
+test("Space opens the focused session without folding its project", async () => {
+  // Given
+  await using app = await fixture()
+  app.mockInput.pressKey("o", { meta: true })
+  await app.waitForFrame(() => app.renderer.currentFocusedRenderable?.id === "session-nav-list")
+  app.mockInput.pressArrow("down")
+  app.mockInput.pressArrow("down")
+  // When
+  app.mockInput.pressKey(" ")
+  // Then
+  await app.waitForFrame((frame) => frame.split("\n").some((line) => line.trimStart().startsWith("2 Beta task")))
+  expect(app.renderer.root.findDescendantById("session-nav-row-ses_beta")).toBeDefined()
+  expect(app.renderer.root.findDescendantById("session-nav-row-ses_alpha")).toBeDefined()
+})
+
+test("the open session stays in its project while other running sessions move to Working", async () => {
+  // Given
+  await using app = await fixture()
+  await app.renderOnce()
+  // When
+  for (const sessionID of ["ses_alpha", "ses_beta"])
+    app.events.emit({ id: `evt_running_${sessionID}`, created: 40, type: "session.execution.started",
+      durable: { aggregateID: sessionID, seq: 1, version: 1 }, data: { sessionID } })
+  // Then
+  await app.waitForFrame((frame) => frame.includes("Working") && frame.includes("Beta task"))
+  // Status events recreate rows; wait until every compared renderable has a laid-out position.
+  await app.waitForFrame(() => ["session-nav-group-working", "session-nav-row-ses_beta",
+    "session-nav-group-proj_alpha", "session-nav-row-ses_alpha"]
+    .every((id) => (app.renderer.root.findDescendantById(id)?.y ?? 0) > 0))
+  const working = app.node("session-nav-group-working")
+  expect(app.node("session-nav-row-ses_beta").y).toBeGreaterThanOrEqual(working.y + working.height)
+  const alphaGroup = app.node("session-nav-group-proj_alpha")
+  expect(app.node("session-nav-row-ses_alpha").y).toBeGreaterThanOrEqual(alphaGroup.y + alphaGroup.height)
+})
+
+test("the footer names the keys while the list or search has focus", async () => {
+  // Given
+  await using app = await fixture()
+  await app.renderOnce()
+  expect(app.captureCharFrame()).not.toContain("↵ open")
+  // When
+  app.mockInput.pressKey("o", { meta: true })
+  // Then
+  await app.waitForFrame((frame) => frame.includes("↵ open · / search · p pin"))
+  app.mockInput.pressKey("f", { meta: true })
+  await app.waitForFrame((frame) => frame.includes("↵ results · esc clear"))
+})
+
+test("native rename updates the authoritative title and row without refetching the list", async () => {
+  // Given
+  let lists = 0
+  await using app = await fixture((url, request) => {
+    if (url.pathname === "/api/session" && request.method === "GET") lists++
+  })
   await app.menu("rename")
   await app.waitForFrame((frame) => frame.includes("Rename session") &&
     app.renderer.currentFocusedRenderable instanceof TextareaRenderable)
@@ -356,11 +479,13 @@ test("native rename updates the authoritative title and row", async () => {
   await app.mockInput.typeText("Renamed beta")
   app.mockInput.pressEnter()
   await app.waitForFrame(() => app.records.get("ses_beta")?.title === "Renamed beta")
+  const before = lists
   app.events.emit({ id: "evt_renamed", created: 40, type: "session.renamed",
     durable: { aggregateID: "ses_beta", seq: 1, version: 1 }, data: { sessionID: "ses_beta", title: "Renamed beta" } })
   // Then
   await app.waitForFrame((frame) => frame.includes("Renamed beta") && !frame.includes("Rename session"))
   expect(app.records.get("ses_beta")?.title).toBe("Renamed beta")
+  expect(lists).toBe(before)
 })
 
 test.each(["archive", "delete"] as const)("rejected %s retains the row with visible feedback", async (action) => {
