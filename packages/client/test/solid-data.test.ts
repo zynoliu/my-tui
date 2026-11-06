@@ -490,6 +490,66 @@ test("preserves a live session rename across concurrent session and family reads
   }
 })
 
+test("applies session.renamed to a loaded session and ignores an unknown id", async () => {
+  const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
+  const reads: string[] = []
+  const unknown = Promise.withResolvers<Response>()
+  const known: SessionInfo = { ...session(0), id: "ses_known", title: "Old title" }
+  const api = OpenCode.make({
+    baseUrl: "http://opencode.local",
+    fetch: async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      const sessionID = request.url.split("/").at(-1) ?? ""
+      reads.push(sessionID)
+      if (sessionID !== known.id) return unknown.promise
+      return Response.json({ data: known })
+    },
+  })
+  const setup = createRoot((dispose) => ({
+    data: createData({
+      api: () => api,
+      directory: "/project",
+      event: {
+        on: () => () => {},
+        listen(handler) {
+          listeners.add(handler)
+          return () => listeners.delete(handler)
+        },
+      },
+    }),
+    dispose,
+  }))
+
+  try {
+    setup.data.session.remember(known)
+    const rename = (sessionID: string, title: string) => {
+      const event: OpenCodeEvent = {
+        id: `evt_renamed_${sessionID}`,
+        created: 2,
+        type: "session.renamed",
+        durable: { aggregateID: sessionID, seq: 1, version: 1 },
+        data: { sessionID, title },
+      }
+      listeners.forEach((listener) => listener({ name: event.type, details: event }))
+    }
+
+    rename(known.id, "New title")
+    await wait(() => setup.data.session.get(known.id)?.title === "New title")
+
+    rename("ses_unknown", "Ghost title")
+    await wait(() => reads.includes("ses_unknown"))
+
+    expect(setup.data.session.get(known.id)?.title).toBe("New title")
+    expect(setup.data.session.get("ses_unknown")).toBeUndefined()
+    expect(setup.data.session.list().some((session) => session.id === "ses_unknown")).toBe(false)
+
+    unknown.resolve(new Response(null, { status: 404 }))
+  } finally {
+    unknown.resolve(new Response(null, { status: 404 }))
+    setup.dispose()
+  }
+})
+
 test("updates authoritative cached project metadata from live events", async () => {
   const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
   const original: Project = {
