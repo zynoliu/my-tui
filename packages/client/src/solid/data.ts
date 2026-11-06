@@ -969,8 +969,23 @@ export function createData(config: CreateDataInput) {
           match.time.completed = event.created
         })
         return
-      case "session.step.started":
+      case "session.step.started": {
+        const replaces = event.data.replaces
+        // A live row streamed under a provisional id is re-keyed in place so the step's
+        // content survives. A missing row was evicted or replaced by a refetch, so the
+        // transcript has to be re-read before the durable row is created.
+        if (replaces !== undefined && !messageIndex.get(event.data.sessionID)?.has(replaces))
+          refresh(() => result.session.message.sync(event.data.sessionID))
         message.update(event.data.sessionID, (draft, index) => {
+          if (replaces !== undefined) {
+            const replaced = index.get(replaces)
+            const row = replaced === undefined ? undefined : draft[replaced]
+            if (replaced !== undefined && row?.type === "assistant") {
+              row.id = event.data.assistantMessageID
+              index.delete(replaces)
+              index.set(event.data.assistantMessageID, replaced)
+            }
+          }
           const position = index.get(event.data.assistantMessageID)
           const existing = position === undefined ? undefined : draft[position]
           if (existing?.type === "assistant") {
@@ -1004,6 +1019,7 @@ export function createData(config: CreateDataInput) {
           })
         })
         return
+      }
       case "session.step.streamed":
         message.editAssistant(event.data.sessionID, event.data.assistantMessageID, (assistant) => {
           assistant.time.streamed = event.created

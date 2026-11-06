@@ -337,6 +337,8 @@ export namespace Step {
     schema: {
       ...Base,
       assistantMessageID: SessionMessage.ID,
+      /** Provisional live row this step re-keys to `assistantMessageID` when the durable row is announced. */
+      replaces: SessionMessage.ID.pipe(optional),
       agent: Agent.ID,
       model: Model.Ref,
       snapshot: Snapshot.ID.pipe(optional),

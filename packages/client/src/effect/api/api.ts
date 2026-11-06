@@ -972,6 +972,7 @@ export type ExperimentalSessionLogOutput =
           readonly data: {
             readonly sessionID: Session.ID
             readonly assistantMessageID: SessionMessage.ID
+            readonly replaces?: SessionMessage.ID | undefined
             readonly agent: Agent.ID
             readonly model: Model.Ref
             readonly snapshot?: Snapshot.ID | undefined

@@ -1405,6 +1405,7 @@ export type SessionStepStarted = {
   data: {
     sessionID: SessionID
     assistantMessageID: SessionMessageID
+    replaces?: SessionMessageID
     agent: AgentID
     model: ModelRef
     snapshot?: SnapshotID

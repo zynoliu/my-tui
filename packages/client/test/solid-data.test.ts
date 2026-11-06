@@ -1500,6 +1500,203 @@ test("projects background user shell metadata from durable shell data", () => {
   }
 })
 
+test("re-keys a provisional assistant row when a step announces the durable id", async () => {
+  const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
+  const model = { providerID: "provider", id: "model" }
+  const api = OpenCode.make({
+    baseUrl: "http://opencode.local",
+    fetch: async (input, init) => {
+      const pathname = new URL((input instanceof Request ? input : new Request(input, init)).url).pathname
+      if (pathname === "/api/session/ses_refresh/message")
+        return Response.json({
+          data: [
+            {
+              id: "msg_live_1",
+              type: "assistant",
+              agent: "build",
+              model,
+              time: { created: 1 },
+              content: [{ type: "text", text: "hello" }],
+            },
+          ],
+          cursor: {},
+        })
+      throw new Error(`Unexpected request: ${pathname}`)
+    },
+  })
+  const setup = createRoot((dispose) => ({
+    data: createData({
+      api: () => api,
+      directory: "/project",
+      event: {
+        on: () => () => {},
+        listen(handler) {
+          listeners.add(handler)
+          return () => listeners.delete(handler)
+        },
+      },
+    }),
+    dispose,
+  }))
+
+  try {
+    await setup.data.session.message.sync("ses_refresh")
+    const event: OpenCodeEvent = {
+      id: "evt_step",
+      created: 2,
+      type: "session.step.started",
+      durable: { aggregateID: "ses_refresh", seq: 1, version: 1 },
+      data: {
+        sessionID: "ses_refresh",
+        assistantMessageID: "msg_durable",
+        replaces: "msg_live_1",
+        agent: "build",
+        model,
+        started: 2,
+      },
+    }
+    listeners.forEach((listener) => listener({ name: event.type, details: event }))
+    const messages = setup.data.session.message.list("ses_refresh")
+    expect(messages.map((message) => message.id)).toEqual(["msg_durable"])
+    expect(messages.filter((message) => message.type === "assistant")).toHaveLength(1)
+    expect(messages).toMatchObject([
+      { id: "msg_durable", type: "assistant", content: [{ type: "text", text: "hello" }], time: { created: 2 } },
+    ])
+  } finally {
+    setup.dispose()
+  }
+})
+
+test("keeps the create and update behavior when a step carries no replacement id", async () => {
+  const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
+  const model = { providerID: "provider", id: "model" }
+  const api = OpenCode.make({
+    baseUrl: "http://opencode.local",
+    fetch: async (input, init) => {
+      const pathname = new URL((input instanceof Request ? input : new Request(input, init)).url).pathname
+      if (pathname === "/api/session/ses_refresh/message")
+        return Response.json({
+          data: [
+            {
+              id: "msg_live_1",
+              type: "assistant",
+              agent: "build",
+              model,
+              time: { created: 1 },
+              content: [{ type: "text", text: "first" }],
+            },
+          ],
+          cursor: {},
+        })
+      throw new Error(`Unexpected request: ${pathname}`)
+    },
+  })
+  const setup = createRoot((dispose) => ({
+    data: createData({
+      api: () => api,
+      directory: "/project",
+      event: {
+        on: () => () => {},
+        listen(handler) {
+          listeners.add(handler)
+          return () => listeners.delete(handler)
+        },
+      },
+    }),
+    dispose,
+  }))
+
+  try {
+    await setup.data.session.message.sync("ses_refresh")
+    const started = (assistantMessageID: string, agent: string, created: number, at: number): OpenCodeEvent => ({
+      id: `evt_step_${created}`,
+      created,
+      type: "session.step.started",
+      durable: { aggregateID: "ses_refresh", seq: created, version: 1 },
+      data: { sessionID: "ses_refresh", assistantMessageID, agent, model, started: at },
+    })
+    listeners.forEach((listener) => listener({ name: "session.step.started", details: started("msg_live_2", "plan", 2, 3) }))
+    expect(setup.data.session.message.list("ses_refresh")).toMatchObject([
+      { id: "msg_live_1", time: { created: 1, completed: 2 } },
+      { id: "msg_live_2", agent: "plan", time: { created: 3 } },
+    ])
+    listeners.forEach((listener) => listener({ name: "session.step.started", details: started("msg_live_2", "build", 3, 4) }))
+    expect(setup.data.session.message.list("ses_refresh")).toMatchObject([
+      { id: "msg_live_1", time: { created: 1, completed: 2 } },
+      { id: "msg_live_2", agent: "build", time: { created: 4 } },
+    ])
+  } finally {
+    setup.dispose()
+  }
+})
+
+test("re-reads the transcript when a step replaces a row that is no longer loaded", async () => {
+  const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
+  const model = { providerID: "provider", id: "model" }
+  const api = OpenCode.make({
+    baseUrl: "http://opencode.local",
+    fetch: async (input, init) => {
+      const pathname = new URL((input instanceof Request ? input : new Request(input, init)).url).pathname
+      if (pathname === "/api/session/ses_refresh/message")
+        return Response.json({
+          data: [
+            {
+              id: "msg_durable",
+              type: "assistant",
+              agent: "build",
+              model,
+              time: { created: 1 },
+              content: [{ type: "text", text: "streamed" }],
+            },
+          ],
+          cursor: {},
+        })
+      throw new Error(`Unexpected request: ${pathname}`)
+    },
+  })
+  const setup = createRoot((dispose) => ({
+    data: createData({
+      api: () => api,
+      directory: "/project",
+      event: {
+        on: () => () => {},
+        listen(handler) {
+          listeners.add(handler)
+          return () => listeners.delete(handler)
+        },
+      },
+    }),
+    dispose,
+  }))
+
+  try {
+    const event: OpenCodeEvent = {
+      id: "evt_step",
+      created: 2,
+      type: "session.step.started",
+      durable: { aggregateID: "ses_refresh", seq: 1, version: 1 },
+      data: {
+        sessionID: "ses_refresh",
+        assistantMessageID: "msg_durable",
+        replaces: "msg_live_1",
+        agent: "build",
+        model,
+        started: 1,
+      },
+    }
+    listeners.forEach((listener) => listener({ name: event.type, details: event }))
+    await wait(
+      () =>
+        setup.data.session.message
+          .get("ses_refresh", "msg_durable")
+          ?.content.some((part) => part.type === "text" && part.text === "streamed") === true,
+    )
+    expect(setup.data.session.message.list("ses_refresh").map((message) => message.id)).toEqual(["msg_durable"])
+  } finally {
+    setup.dispose()
+  }
+})
+
 function modelInfo(name: string): ModelInfo {
   return {
     id: "chat",
